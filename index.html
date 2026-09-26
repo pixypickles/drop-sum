@@ -22,8 +22,31 @@ header{display:flex;justify-content:space-between;align-items:center}h1{font-siz
 .controls{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}button{border:0;border-radius:12px;background:#26364c;color:white;font-weight:900;font-size:23px;padding:12px 2px;touch-action:manipulation}button:active{transform:scale(.96)}
 #signBtn{font-size:18px;background:#684c85}.actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}.actions button{font-size:14px;padding:10px}
 details{background:#1e293b;border-radius:10px;padding:8px 10px;font-size:13px}.row{display:flex;justify-content:space-between;align-items:center;margin:6px 0}select{background:#0f172a;color:white;border:1px solid #475569;border-radius:6px;padding:4px}
+
+#titleScreen{position:fixed;inset:0;z-index:50;background:linear-gradient(180deg,#0b1423,#101827);display:flex;align-items:center;justify-content:center;padding:20px}
+.titleCard{width:min(92vw,430px);background:#18263a;border:1px solid #ffffff18;border-radius:22px;padding:24px 20px;box-shadow:0 18px 60px #0009;text-align:center}
+.logo{font-size:42px;font-weight:1000;letter-spacing:-2px;margin:2px 0}.tag{color:#aebbd0;margin-bottom:20px}
+.rules{text-align:left;background:#0d1727;border-radius:14px;padding:14px 16px;margin:15px 0;line-height:1.65;font-size:14px}
+.rules b{color:#fde68a}.startBtn{width:100%;font-size:20px;background:#e9c45b;color:#172033;padding:14px;border-radius:14px}
+.small{font-size:12px;color:#8fa0b8;margin-top:10px}
+#soundBtn{position:absolute;right:10px;top:10px;background:#26364c;font-size:15px;padding:7px 10px;border-radius:9px}
 </style></head>
-<body><div id="app">
+<body><div id="titleScreen">
+<div class="titleCard">
+<div class="logo">DROP SUM</div>
+<div class="tag">落として、足して、引いて、ぴったり。</div>
+<div class="rules">
+<b>遊び方</b><br>
+・1〜3個の数字ブロックがランダムに落下<br>
+・4列それぞれに「目標値」があります<br>
+・列の合計を目標値ぴったりにすると、その列をCLEAR<br>
+・<b>＋/−</b>で落下中のブロックの符号を反転できます<br>
+・回転と左右移動を使って、列の合計を調整しましょう<br>
+・上まで積み上がるとGAME OVER
+</div>
+<button class="startBtn" id="startGame">GAME START</button>
+<div class="small">数字ごとの色は固定。目標は初期設定で11〜19です。</div>
+</div></div><div id="app"><button id="soundBtn">🔊 SOUND</button>
 <header><div><h1>TARGET DROP</h1><div class="sub">列の合計を目標値ぴったりに</div></div>
 <div class="stats"><div class="stat">SCORE<b id="score">0</b></div><div class="stat">CLEAR<b id="clears">0</b></div></div></header>
 <div id="msg"></div><div id="board"></div><div class="targets" id="targets"></div>
@@ -35,6 +58,21 @@ details{background:#1e293b;border-radius:10px;padding:8px 10px;font-size:13px}.r
 <div>数字は1〜5。数字ごとに薄いパステルカラーを固定し、数字と符号は黒で統一。ブロックは縦を少し潰した形です。＋/－ボタンで落下中のブロックをまとめて符号反転します。落下ブロック数は1・2・3個からランダムです。着地後、各列の合計が目標値と一致するとその列が消え、新しい目標値になります。</div>
 </details></div>
 <script>
+let audioCtx=null,soundOn=true,started=false;
+function audio(){if(!audioCtx)audioCtx=new (window.AudioContext||window.webkitAudioContext)();if(audioCtx.state==='suspended')audioCtx.resume();return audioCtx}
+function tone(freq,dur=.08,type='sine',vol=.045,delay=0){
+ if(!soundOn||!started)return;
+ const a=audio(),o=a.createOscillator(),g=a.createGain(),t=a.currentTime+delay;
+ o.type=type;o.frequency.setValueAtTime(freq,t);g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(.001,t+dur);
+ o.connect(g);g.connect(a.destination);o.start(t);o.stop(t+dur);
+}
+function sMove(){tone(260,.035,'square',.018)}
+function sRotate(){tone(390,.05,'triangle',.025);tone(520,.04,'triangle',.018,.035)}
+function sFlip(){tone(520,.05,'square',.025);tone(260,.06,'square',.02,.045)}
+function sDrop(){tone(150,.07,'triangle',.04)}
+function sClear(){tone(523,.09,'sine',.05);tone(659,.09,'sine',.05,.08);tone(784,.14,'sine',.055,.16)}
+function sGameOver(){tone(300,.13,'sawtooth',.035);tone(220,.15,'sawtooth',.035,.12);tone(150,.25,'sawtooth',.035,.26)}
+
 const W=4,H=10;let board,cur,targets,score=0,clears=0,locked=false,gameOver=false,timer=null,FALL=2500,paused=false;
 const boardEl=document.getElementById('board'),targetsEl=document.getElementById('targets'),msg=document.getElementById('msg');
 let cells=[];
@@ -52,22 +90,22 @@ function valid(x,y,d){for(const [cx,cy] of coords(x,y,d)){if(cx<0||cx>=W||cy>=H)
 function spawn(){
  const r=Math.random(), count=r<0.22?1:(r<0.78?2:3);
  cur={x:1,y:count===3?2:1,dir:0,blocks:Array.from({length:count},block)};
- if(!valid(cur.x,cur.y,cur.dir)){gameOver=true;msg.textContent='GAME OVER';stop();return}render();start();
+ if(!valid(cur.x,cur.y,cur.dir)){gameOver=true;msg.textContent='GAME OVER';sGameOver();stop();return}render();start();
 }
 function stop(){if(timer){clearInterval(timer);timer=null}}function start(){stop();timer=setInterval(step,FALL)}
 function step(){if(locked||gameOver)return;if(valid(cur.x,cur.y+1,cur.dir)){cur.y++;render()}else lock()}
-function move(dx){if(!locked&&!gameOver&&valid(cur.x+dx,cur.y,cur.dir)){cur.x+=dx;render()}}
-function rotate(d){if(locked||gameOver)return;let nd=(cur.dir+d+4)%4;if(valid(cur.x,cur.y,nd)){cur.dir=nd;render();return}for(const k of [-1,1])if(valid(cur.x+k,cur.y,nd)){cur.x+=k;cur.dir=nd;render();return}}
-function flip(){if(locked||gameOver)return;cur.blocks.forEach(b=>b.sgn*=-1);render()}
+function move(dx){if(!locked&&!gameOver&&valid(cur.x+dx,cur.y,cur.dir)){cur.x+=dx;sMove();render()}}
+function rotate(d){if(locked||gameOver)return;let nd=(cur.dir+d+4)%4;if(valid(cur.x,cur.y,nd)){cur.dir=nd;sRotate();render();return}for(const k of [-1,1])if(valid(cur.x+k,cur.y,nd)){cur.x+=k;cur.dir=nd;sRotate();render();return}}
+function flip(){if(locked||gameOver)return;cur.blocks.forEach(b=>b.sgn*=-1);sFlip();render()}
 function soft(){if(locked||gameOver)return;if(valid(cur.x,cur.y+1,cur.dir)){cur.y++;render()}else lock()}
-function hardDrop(){if(locked||gameOver)return;stop();while(valid(cur.x,cur.y+1,cur.dir))cur.y++;lock()}
+function hardDrop(){if(locked||gameOver)return;stop();while(valid(cur.x,cur.y+1,cur.dir))cur.y++;sDrop();lock()}
 function gravity(){for(let x=0;x<W;x++){let a=[];for(let y=H-1;y>=0;y--)if(board[y][x])a.push(board[y][x]);for(let y=H-1,i=0;y>=0;y--)board[y][x]=i<a.length?a[i++]:null}}
 function colSum(x){let s=0;for(let y=0;y<H;y++)if(board[y][x])s+=board[y][x].n*board[y][x].sgn;return s}
-async function lock(){stop();locked=true;for(const [x,y,b] of coords()){if(y<0){gameOver=true;msg.textContent='GAME OVER';locked=false;return}board[y][x]=b}gravity();render();await resolve();locked=false;if(!gameOver)spawn()}
+async function lock(){stop();locked=true;for(const [x,y,b] of coords()){if(y<0){gameOver=true;msg.textContent='GAME OVER';sGameOver();locked=false;return}board[y][x]=b}gravity();render();await resolve();locked=false;if(!gameOver)spawn()}
 async function resolve(){
  let hit=[];for(let x=0;x<W;x++)if(colSum(x)===targets[x]&&board.some(r=>r[x]))hit.push(x);
  if(!hit.length)return;
- msg.textContent='TARGET CLEAR!';hit.forEach(x=>targetsEl.children[x].classList.add('hit'));await new Promise(r=>setTimeout(r,350));
+ msg.textContent='TARGET CLEAR!';sClear();hit.forEach(x=>targetsEl.children[x].classList.add('hit'));await new Promise(r=>setTimeout(r,350));
  for(const x of hit){let count=0;for(let y=0;y<H;y++){if(board[y][x])count++;board[y][x]=null}score+=count*150;clears++;targets[x]=newTarget()}
  document.getElementById('score').textContent=score;document.getElementById('clears').textContent=clears;gravity();render();await new Promise(r=>setTimeout(r,180));msg.textContent='';
  // simultaneous clearing can alter nothing in other columns, so one pass is sufficient
@@ -79,5 +117,13 @@ function reset(){stop();board=Array.from({length:H},()=>Array(W).fill(null));tar
 build();left.onclick=()=>move(-1);right.onclick=()=>move(1);ccw.onclick=()=>rotate(-1);cw.onclick=()=>rotate(1);signBtn.onclick=flip;down.onclick=soft;hard.onclick=hardDrop;restart.onclick=reset;
 speed.onchange=()=>{FALL=+speed.value;if(!locked&&!gameOver)start()};range.onchange=reset;
 document.addEventListener('keydown',e=>{if(e.key==='ArrowLeft')move(-1);if(e.key==='ArrowRight')move(1);if(e.key==='ArrowDown')soft();if(e.key===' ')hardDrop();if(e.key==='z')rotate(-1);if(e.key==='x'||e.key==='ArrowUp')rotate(1);if(e.key==='c')flip()});
-reset();
+document.getElementById('startGame').onclick=()=>{
+ started=true;audio();document.getElementById('titleScreen').style.display='none';reset();tone(440,.06,'sine',.04);tone(660,.1,'sine',.04,.07);
+};
+document.getElementById('soundBtn').onclick=()=>{
+ soundOn=!soundOn;document.getElementById('soundBtn').textContent=soundOn?'🔊 SOUND':'🔇 SOUND';
+ if(soundOn&&started){audio();tone(500,.06,'sine',.035)}
+};
+// Initialize the board behind the title screen, but do not run the game timer until START.
+stop();board=Array.from({length:H},()=>Array(W).fill(null));targets=Array.from({length:W},newTarget);render();
 </script></body></html>
