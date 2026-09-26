@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>TARGET DROP Prototype</title>
+<style>
+:root{--cell:min(19vw,72px);--cellh:min(13.2vw,50px);--gap:4px}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:#101827;color:#f8fafc;font-family:system-ui,-apple-system,sans-serif;display:flex;justify-content:center;min-height:100vh}
+#app{width:min(100%,460px);padding:12px;display:flex;flex-direction:column;gap:9px}
+header{display:flex;justify-content:space-between;align-items:center}h1{font-size:21px;margin:0}.sub{font-size:12px;color:#a8b3c5}
+.stats{display:flex;gap:7px}.stat{background:#1e293b;padding:6px 9px;border-radius:10px;text-align:center;min-width:66px}.stat b{display:block;font-size:18px}
+#board{display:grid;grid-template-columns:repeat(4,var(--cell));grid-template-rows:repeat(10,var(--cellh));gap:var(--gap);background:#07101f;padding:6px;border-radius:13px;margin:auto}
+.cell{width:var(--cell);height:var(--cellh);border-radius:9px;background:#192536;position:relative;display:flex;align-items:center;justify-content:center;border:1px solid #ffffff0d}
+.piece{box-shadow:inset 0 -5px #0002,inset 0 2px #fff6;color:#111827}.n1{background:#d8c5f0}.n2{background:#b9dcf5}.n3{background:#bfe7c8}.n4{background:#f6dfa0}.n5{background:#f3b8b5}
+.num{font-size:calc(var(--cellh)*.62);font-weight:1000;line-height:1;color:#111827}
+.sign{position:absolute;left:5px;top:1px;font-size:calc(var(--cellh)*.34);font-weight:1000;color:#111827;text-shadow:none;z-index:2}
+.neg{outline:3px solid #111827;outline-offset:-4px}
+.targets{display:grid;grid-template-columns:repeat(4,var(--cell));gap:var(--gap);margin:auto;background:#07101f;padding:0 6px 6px;border-radius:0 0 13px 13px}
+.target{width:var(--cell);text-align:center;background:#27364c;border-radius:9px;padding:5px 1px;font-size:12px;color:#b9c6d8}
+.target b{font-size:23px;display:block;color:white}.target.hit{animation:hit .35s alternate 3}@keyframes hit{to{background:#fff;color:#111;transform:scale(.92)}}
+#msg{text-align:center;height:24px;font-weight:900;color:#fde68a}
+.controls{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}button{border:0;border-radius:12px;background:#26364c;color:white;font-weight:900;font-size:23px;padding:12px 2px;touch-action:manipulation}button:active{transform:scale(.96)}
+#signBtn{font-size:18px;background:#684c85}.actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}.actions button{font-size:14px;padding:10px}
+details{background:#1e293b;border-radius:10px;padding:8px 10px;font-size:13px}.row{display:flex;justify-content:space-between;align-items:center;margin:6px 0}select{background:#0f172a;color:white;border:1px solid #475569;border-radius:6px;padding:4px}
+</style></head>
+<body><div id="app">
+<header><div><h1>TARGET DROP</h1><div class="sub">列の合計を目標値ぴったりに</div></div>
+<div class="stats"><div class="stat">SCORE<b id="score">0</b></div><div class="stat">CLEAR<b id="clears">0</b></div></div></header>
+<div id="msg"></div><div id="board"></div><div class="targets" id="targets"></div>
+<div class="controls"><button id="left">←</button><button id="ccw">↺</button><button id="signBtn">＋/－</button><button id="cw">↻</button><button id="right">→</button></div>
+<div class="actions"><button id="down">▼ 1段</button><button id="hard">⤓ 一気に</button><button id="restart">NEW</button></div>
+<details><summary>試作設定</summary>
+<div class="row"><span>落下速度</span><select id="speed"><option value="3000">3.0秒</option><option value="2500" selected>2.5秒</option><option value="2000">2.0秒</option><option value="1500">1.5秒</option></select></div>
+<div class="row"><span>目標値</span><select id="range"><option value="11,19" selected>11〜19</option><option value="10,18">10〜18</option><option value="12,20">12〜20</option><option value="15,25">15〜25</option></select></div>
+<div>数字は1〜5。数字ごとに薄いパステルカラーを固定し、数字と符号は黒で統一。ブロックは縦を少し潰した形です。＋/－ボタンで落下中のブロックをまとめて符号反転します。落下ブロック数は1・2・3個からランダムです。着地後、各列の合計が目標値と一致するとその列が消え、新しい目標値になります。</div>
+</details></div>
+<script>
+const W=4,H=10;let board,cur,targets,score=0,clears=0,locked=false,gameOver=false,timer=null,FALL=2500,paused=false;
+const boardEl=document.getElementById('board'),targetsEl=document.getElementById('targets'),msg=document.getElementById('msg');
+let cells=[];
+function build(){boardEl.innerHTML='';for(let i=0;i<W*H;i++){let d=document.createElement('div');d.className='cell';boardEl.appendChild(d)}cells=[...boardEl.children];targetsEl.innerHTML='';for(let x=0;x<W;x++){let d=document.createElement('div');d.className='target';targetsEl.appendChild(d)}}
+function rnd(n){return Math.floor(Math.random()*n)} function block(){return {n:1+rnd(5),sgn:1}}
+function range(){return document.getElementById('range').value.split(',').map(Number)} function newTarget(){let [a,b]=range();return a+rnd(b-a+1)}
+function pieceOffsets(count,dir){
+ let base=count===1?[[0,0]]:count===2?[[0,0],[0,-1]]:[[0,0],[0,-1],[0,-2]];
+ return base.map(([x,y])=>{for(let i=0;i<dir;i++) [x,y]=[-y,x];return [x,y]});
+}
+function coords(x=cur.x,y=cur.y,d=cur.dir){
+ return pieceOffsets(cur.blocks.length,d).map(([dx,dy],i)=>[x+dx,y+dy,cur.blocks[i]]);
+}
+function valid(x,y,d){for(const [cx,cy] of coords(x,y,d)){if(cx<0||cx>=W||cy>=H)return false;if(cy>=0&&board[cy][cx])return false}return true}
+function spawn(){
+ const r=Math.random(), count=r<0.22?1:(r<0.78?2:3);
+ cur={x:1,y:count===3?2:1,dir:0,blocks:Array.from({length:count},block)};
+ if(!valid(cur.x,cur.y,cur.dir)){gameOver=true;msg.textContent='GAME OVER';stop();return}render();start();
+}
+function stop(){if(timer){clearInterval(timer);timer=null}}function start(){stop();timer=setInterval(step,FALL)}
+function step(){if(locked||gameOver)return;if(valid(cur.x,cur.y+1,cur.dir)){cur.y++;render()}else lock()}
+function move(dx){if(!locked&&!gameOver&&valid(cur.x+dx,cur.y,cur.dir)){cur.x+=dx;render()}}
+function rotate(d){if(locked||gameOver)return;let nd=(cur.dir+d+4)%4;if(valid(cur.x,cur.y,nd)){cur.dir=nd;render();return}for(const k of [-1,1])if(valid(cur.x+k,cur.y,nd)){cur.x+=k;cur.dir=nd;render();return}}
+function flip(){if(locked||gameOver)return;cur.blocks.forEach(b=>b.sgn*=-1);render()}
+function soft(){if(locked||gameOver)return;if(valid(cur.x,cur.y+1,cur.dir)){cur.y++;render()}else lock()}
+function hardDrop(){if(locked||gameOver)return;stop();while(valid(cur.x,cur.y+1,cur.dir))cur.y++;lock()}
+function gravity(){for(let x=0;x<W;x++){let a=[];for(let y=H-1;y>=0;y--)if(board[y][x])a.push(board[y][x]);for(let y=H-1,i=0;y>=0;y--)board[y][x]=i<a.length?a[i++]:null}}
+function colSum(x){let s=0;for(let y=0;y<H;y++)if(board[y][x])s+=board[y][x].n*board[y][x].sgn;return s}
+async function lock(){stop();locked=true;for(const [x,y,b] of coords()){if(y<0){gameOver=true;msg.textContent='GAME OVER';locked=false;return}board[y][x]=b}gravity();render();await resolve();locked=false;if(!gameOver)spawn()}
+async function resolve(){
+ let hit=[];for(let x=0;x<W;x++)if(colSum(x)===targets[x]&&board.some(r=>r[x]))hit.push(x);
+ if(!hit.length)return;
+ msg.textContent='TARGET CLEAR!';hit.forEach(x=>targetsEl.children[x].classList.add('hit'));await new Promise(r=>setTimeout(r,350));
+ for(const x of hit){let count=0;for(let y=0;y<H;y++){if(board[y][x])count++;board[y][x]=null}score+=count*150;clears++;targets[x]=newTarget()}
+ document.getElementById('score').textContent=score;document.getElementById('clears').textContent=clears;gravity();render();await new Promise(r=>setTimeout(r,180));msg.textContent='';
+ // simultaneous clearing can alter nothing in other columns, so one pass is sufficient
+}
+function face(b){return '<span class="num">'+b.n+'</span><span class="sign">'+(b.sgn>0?'+':'−')+'</span>'}
+function render(){cells.forEach((d,i)=>{let y=Math.floor(i/W),x=i%W,b=board[y][x];d.className='cell';d.innerHTML='';if(b){d.classList.add('piece','n'+b.n);if(b.sgn<0)d.classList.add('neg');d.innerHTML=face(b)}});if(cur&&!gameOver)for(const [x,y,b] of coords())if(y>=0){let d=cells[y*W+x];d.classList.add('piece','n'+b.n);if(b.sgn<0)d.classList.add('neg');d.innerHTML=face(b)}
+[...targetsEl.children].forEach((d,x)=>{d.className='target';d.innerHTML='合計 '+colSum(x)+'<b>'+targets[x]+'</b>'})}
+function reset(){stop();board=Array.from({length:H},()=>Array(W).fill(null));targets=Array.from({length:W},newTarget);score=clears=0;locked=gameOver=false;document.getElementById('score').textContent=0;document.getElementById('clears').textContent=0;msg.textContent='';spawn()}
+build();left.onclick=()=>move(-1);right.onclick=()=>move(1);ccw.onclick=()=>rotate(-1);cw.onclick=()=>rotate(1);signBtn.onclick=flip;down.onclick=soft;hard.onclick=hardDrop;restart.onclick=reset;
+speed.onchange=()=>{FALL=+speed.value;if(!locked&&!gameOver)start()};range.onchange=reset;
+document.addEventListener('keydown',e=>{if(e.key==='ArrowLeft')move(-1);if(e.key==='ArrowRight')move(1);if(e.key==='ArrowDown')soft();if(e.key===' ')hardDrop();if(e.key==='z')rotate(-1);if(e.key==='x'||e.key==='ArrowUp')rotate(1);if(e.key==='c')flip()});
+reset();
+</script></body></html>
